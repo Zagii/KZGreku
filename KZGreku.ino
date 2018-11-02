@@ -65,6 +65,23 @@ KZGrekuKomora komory[KOMORY_SZT]=
 String pubTopic="KZGrekuOUT/";
 String subTopic="KZGrekuIN/#";
 
+char trybPracy=T_OFF;
+char trybPracyPop=T_OFF;
+unsigned long kominekMillis=0;
+
+bool isIntChars(char * ctab) 
+{
+  
+  bool decPt = false;
+  uint8_t startInd=0;
+  if(ctab[0] == '+' || ctab[0] == '-') startInd=1;
+
+  for(uint8_t x=startInd;x<strlen(ctab);x++)
+  {
+   if(!isDigit(ctab[x])) return false;
+  }
+  return true;
+}
 void isrIN()
 {
   wiatraki[WIATRAK_IN].obslugaTachoISR();
@@ -96,8 +113,8 @@ void callback(char* topic, byte* payload, unsigned int length)
     Serial.print(topic);
     Serial.print(" msg=");
     Serial.println(p);
-    //parsujRozkaz(topic,p);
-    parsujIdodajDoKolejki(topic,p);
+    parsujRozkaz(topic,p);
+  
   free(p);
 }
 
@@ -150,28 +167,25 @@ void setup()
 
 void setTrybPracy(char t)
 {
+  if(trybPracy==t) return;
   trybPracyPop=trybPracy;
   trybPracy=t;
   if(trybPracy==T_KOMINEK)
   {
     kominekMillis=millis();
   }
-  
-  char topic[MAX_TOPIC_LENGHT];
-  strcpy(topic,outTopic);
-  strcat(topic,"/TrybPracy");
-  char msg[2];//[MAX_MSG_LENGHT];
-  msg[0]=t;msg[1]='\0';
-  RSpisz(topic,msg);
+  String topic=pubTopic+"/TrybPracy/";
+  String msg=String(t);
+  mqtt.mqttPub(topic,msg);
 }
 
-void parsujIdodajDoKolejki(char* topic,char * msg)
+void parsujRozkaz(char* topic,char * msg)
 {
    if(strstr(topic,"WiatrakN")>0)
    {
-     if(utils.isIntChars(msg))
+     if(isIntChars(msg))
      {
-        dodajDoKolejki(R_PWM_NAWIEW,atoi(msg));       
+        realizujRozkaz(R_PWM_NAWIEW,atoi(msg));       
      }else
      {
          DPRINT("ERR msg WiatrakN nie int, linia:");DPRINTLN(__LINE__);
@@ -180,20 +194,21 @@ void parsujIdodajDoKolejki(char* topic,char * msg)
     }
     if(strstr(topic,"WiatrakW")>0)
     {
-      if(utils.isIntChars(msg))
+      if(isIntChars(msg))
       {
-        dodajDoKolejki(R_PWM_WYWIEW,atoi(msg));
+        realizujRozkaz(R_PWM_WYWIEW,atoi(msg));
       }else
       {
         DPRINT("ERR msg WiatrakW nie int, linia:");DPRINTLN(__LINE__);
       }
      return; 
     }
+    -------- nie inTopic a subTopic przemyslec 
     if(strlen(topic)==strlen(inTopic)+2)  //Reku/X
     {
-       if(utils.isIntChars(msg))
+       if(isIntChars(msg))
       {
-        dodajDoKolejki(topic[strlen(topic)-1],atoi(msg));
+        realizujRozkaz(topic[strlen(topic)-1],atoi(msg));
       }else
       {
         DPRINT("ERR msg ");DPRINT(msg);DPRINT(" nie int, linia:");DPRINTLN(__LINE__);
