@@ -203,7 +203,7 @@ void parsujRozkaz(char* topic,char * msg)
       }
      return; 
     }
-    -------- nie inTopic a subTopic przemyslec 
+ /*   -------- nie inTopic a subTopic przemyslec 
     if(strlen(topic)==strlen(inTopic)+2)  //Reku/X
     {
        if(isIntChars(msg))
@@ -215,7 +215,7 @@ void parsujRozkaz(char* topic,char * msg)
       }
       
      return; 
-    }
+    }*/
 }
 void realizujRozkaz(uint16_t paramName,uint16_t paramValue) 
 {
