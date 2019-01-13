@@ -9,19 +9,22 @@
 #include <KZGwiatrak.h>
 #include <KZGrekuKomora.h>
 
-#define PIN_WIATRAK_CZERPNIA D6
+#define PIN_WIATRAK_CZERPNIA D6  //12
 #define PIN_TACHO_WIATRAK_CZERPNIA D2  //pin gpio4
-#define PIN_WIATRAK_WYWIEW D5
-#define PIN_TACHO_WIATRAK_WYWIEW D1   
-#define PIN_ONEWIRE D7  
+#define PIN_WIATRAK_WYWIEW D5  //14
+#define PIN_TACHO_WIATRAK_WYWIEW D1   //5
+#define PIN_ONEWIRE D7  //13
 
 #define R_PWM_NAWIEW 'N'  // pwm wiatrak 1
 #define R_PWM_WYWIEW 'W'   // pwm wiatrak 2
+#define R_PWM_MANUAL 'M'  //oba razem
 #define R_ROZMRAZANIE_WIATRAKI 'R' //
 #define R_ROZMRAZANIE_GGWC 'G' //
 #define R_KOMINEK 'K' //
 #define R_AUTO 'A' //tryb automatycznego dobrania predkosci
 #define R_OFF 'O'
+#define R_ZMIEN_TRYB 'T'
+#define R_FORCE_MANUAL 'F'
 
 #define T_AUTO 'a'
 #define T_MANUAL 'm'
@@ -29,6 +32,7 @@
 #define T_ROZMRAZANIE_WIATRAKI 'r'
 #define T_ROZMRAZANIE_GGWC 'g'
 #define T_OFF 'o'
+#define T_FORCE_MANUAL 'f' // wymuszenie manuala totalnego bez rozmrazania
 
 #define KOMORA_CZERPNIA 0
 #define KOMORA_WYRZUTNIA 1
@@ -56,10 +60,10 @@ DeviceAddress termometrAddr[]={  { 0x28, 0x52, 0x96, 0x23, 0x06, 0x00, 0x00, 0x5
                                         { 0x28, 0x67, 0xD4, 0x22, 0x06, 0x00, 0x00, 0xC7 }};
 KZGrekuKomora komory[KOMORY_SZT]=
 {
-  KZGrekuKomora(0,&termometrAddr[0]),
-  KZGrekuKomora(1,&termometrAddr[1]),
-  KZGrekuKomora(2,&termometrAddr[2]),
-  KZGrekuKomora(3,&termometrAddr[3])
+  KZGrekuKomora(0,termometrAddr[0]),
+  KZGrekuKomora(1,termometrAddr[1]),
+  KZGrekuKomora(2,termometrAddr[2]),
+  KZGrekuKomora(3,termometrAddr[3])
 };
 
 String pubTopic="KZGrekuOUT/";
@@ -145,15 +149,7 @@ void setup()
     mqtt.addSubscribeTopic(subTopic);
     //mqtt.importFromFile();
     ////////////////////////////////////////////////////////////////////
-
-    ////////////// wiatraki ///////////////////////////
-     wiatraki[WIATRAK_IN].begin();
-     wiatraki[WIATRAK_OUT].begin();
-  
-     attachInterrupt(digitalPinToInterrupt( wiatraki[WIATRAK_IN].dajISR()), isrIN, RISING );
-     attachInterrupt(digitalPinToInterrupt( wiatraki[WIATRAK_OUT].dajISR()), isrOUT, RISING );
-    //////////////////////////////////////
-    //////////// komory //////////////////
+  //////////// komory //////////////////
     OneWire oneWire(PIN_ONEWIRE);
 
     for(int i=0;i<KOMORY_SZT;i++)
@@ -161,8 +157,18 @@ void setup()
       komory[i].begin(&oneWire);
     }
     
+    ////////////// wiatraki ///////////////////////////
+     wiatraki[WIATRAK_IN].begin();
+     wiatraki[WIATRAK_OUT].begin();
+  
+     attachInterrupt(digitalPinToInterrupt( wiatraki[WIATRAK_IN].dajISR()), isrIN, RISING );
+     attachInterrupt(digitalPinToInterrupt( wiatraki[WIATRAK_OUT].dajISR()), isrOUT, RISING );
+    //////////////////////////////////////
+  
     ////////////////////////////
     Serial.println("Koniec Setup"); 
+    delay(2000);
+    Serial.println(".............................."); 
 }
 
 void setTrybPracy(char t)
@@ -174,13 +180,25 @@ void setTrybPracy(char t)
   {
     kominekMillis=millis();
   }
-  String topic=pubTopic+"/TrybPracy/";
+  String topic=pubTopic+"TrybPracy/";
   String msg=String(t);
+  DPRINT("--- Zmiana TrybPracy:");DPRINTLN(msg);
   mqtt.mqttPub(topic,msg);
 }
 
 void parsujRozkaz(char* topic,char * msg)
 {
+    if(strstr(topic,"Wiatraki")>0)
+    {
+     if(isIntChars(msg))
+     {
+        realizujRozkaz(R_PWM_MANUAL,atoi(msg));       
+     }else
+     {
+         DPRINT("ERR msg Wiatraki nie int, linia:");DPRINTLN(__LINE__);
+     }
+     return;
+    }
    if(strstr(topic,"WiatrakN")>0)
    {
      if(isIntChars(msg))
@@ -203,6 +221,17 @@ void parsujRozkaz(char* topic,char * msg)
       }
      return; 
     }
+    if(strstr(topic,"TrybPracy")>0)
+    {
+      //if(isIntChars(msg))
+     // {
+        realizujRozkaz(R_ZMIEN_TRYB,atoi(msg));
+      //}else
+     // {
+      //  DPRINT("ERR msg WiatrakW nie int, linia:");DPRINTLN(__LINE__);
+      //}
+     return; 
+    }
  /*   -------- nie inTopic a subTopic przemyslec 
     if(strlen(topic)==strlen(inTopic)+2)  //Reku/X
     {
@@ -222,28 +251,41 @@ void realizujRozkaz(uint16_t paramName,uint16_t paramValue)
   switch(paramName)
   {
     case R_PWM_NAWIEW:
-      setTrybPracy(T_MANUAL);
-      wiatraki[WIATRAK_IN].ustawPredkosc(paramValue);
+      if(trybPracy!=T_FORCE_MANUAL)setTrybPracy(T_MANUAL);
+    //  wiatraki[WIATRAK_IN].ustawPredkosc(paramValue);
+     ustawPredkoscPublikuj(WIATRAK_IN,paramValue);
     break;
     case R_PWM_WYWIEW:
-      setTrybPracy(T_MANUAL);
-      wiatraki[WIATRAK_OUT].ustawPredkosc(paramValue);
+      if(trybPracy!=T_FORCE_MANUAL)setTrybPracy(T_MANUAL);
+      //wiatraki[WIATRAK_OUT].ustawPredkosc(paramValue);
+      ustawPredkoscPublikuj(WIATRAK_OUT,paramValue);
+    break;
+    case R_PWM_MANUAL:
+      if(trybPracy!=T_FORCE_MANUAL)setTrybPracy(T_MANUAL);
+      if(paramValue==0){realizujRozkaz(R_OFF,0);break;}
+      ustawPredkoscPublikuj(WIATRAK_IN,paramValue);
+      ustawPredkoscPublikuj(WIATRAK_OUT,paramValue);
     break;
     case R_ROZMRAZANIE_WIATRAKI:
-      setTrybPracy(T_ROZMRAZANIE_WIATRAKI) ;
+      if(trybPracy!=T_FORCE_MANUAL)setTrybPracy(T_ROZMRAZANIE_WIATRAKI) ;
     break;
     case R_ROZMRAZANIE_GGWC:
-      setTrybPracy(T_ROZMRAZANIE_GGWC);
+      if(trybPracy!=T_FORCE_MANUAL)setTrybPracy(T_ROZMRAZANIE_GGWC);
     break;
     case R_KOMINEK:
-      setTrybPracy(T_KOMINEK);   
+     if(trybPracy!=T_FORCE_MANUAL) setTrybPracy(T_KOMINEK);   
     break;
     case R_AUTO:
-      setTrybPracy(T_AUTO);
+      if(trybPracy!=T_FORCE_MANUAL)setTrybPracy(T_AUTO);
     break;
     case R_OFF:
       setTrybPracy(T_OFF);
-    break;        
+      ustawPredkoscPublikuj(WIATRAK_IN,0);
+      ustawPredkoscPublikuj(WIATRAK_OUT,0);
+    break;   
+    case R_ZMIEN_TRYB:
+      setTrybPracy(paramValue);
+    break;     
   }
   
 }
@@ -254,15 +296,18 @@ void automat()
   ///////////////////// wyznacz obroty wiatraka ////////////
             // gdy manual to tylko sprawdz czy nie zamarza
             //jesli temp wyrzutni < 2C ustaw rozmrazanie
-            if((trybPracy!=T_OFF)&&(komory[KOMORA_WYRZUTNIA].dajTemp()<1.0f))
+            if((trybPracy!=T_OFF)&&(komory[KOMORA_WYRZUTNIA].dajTemp()<1.0f)&&(trybPracy!=T_FORCE_MANUAL))
             {
-               setTrybPracy(T_ROZMRAZANIE_WIATRAKI);
+    //--- tymczasowo poku robie bez podlaczonych termometrów           
+  //  setTrybPracy(T_ROZMRAZANIE_WIATRAKI);
             }
             switch(trybPracy)
             {
               case T_OFF:
                    wiatraki[WIATRAK_IN].ustawPredkosc(0);
                    wiatraki[WIATRAK_OUT].ustawPredkosc(0);
+               //   ustawPredkoscPublikuj(WIATRAK_IN,0);
+               //   ustawPredkoscPublikuj(WIATRAK_OUT,0);
                  break;
               case T_MANUAL:
                 break;
@@ -273,6 +318,8 @@ void automat()
                 //pora dnia
                   wiatraki[WIATRAK_IN].ustawPredkosc(15);
                   wiatraki[WIATRAK_OUT].ustawPredkosc(15);
+                  //ustawPredkoscPublikuj(WIATRAK_IN,15);
+                  //ustawPredkoscPublikuj(WIATRAK_OUT,15);
                 break;
               case T_KOMINEK:
               //todo czas 5min?
@@ -282,15 +329,18 @@ void automat()
                 }
                   wiatraki[WIATRAK_IN].ustawPredkosc(50);
                   wiatraki[WIATRAK_OUT].ustawPredkosc(15);
-                
+                 //ustawPredkoscPublikuj(WIATRAK_IN,50);
+                  //ustawPredkoscPublikuj(WIATRAK_OUT,15);
                 break;
               case T_ROZMRAZANIE_WIATRAKI:
                 if(komory[KOMORA_WYRZUTNIA].dajTemp()>3.0f)
                 {
                   setTrybPracy(T_AUTO);
                 } 
-                wiatraki[WIATRAK_IN].ustawPredkosc(15);
-                wiatraki[WIATRAK_OUT].ustawPredkosc(30);
+                wiatraki[WIATRAK_IN].ustawPredkosc(35);
+                wiatraki[WIATRAK_OUT].ustawPredkosc(60);
+               //  ustawPredkoscPublikuj(WIATRAK_IN,15);
+               //  ustawPredkoscPublikuj(WIATRAK_OUT,30);
                 break;
               case T_ROZMRAZANIE_GGWC:
                 break;
@@ -305,6 +355,20 @@ unsigned long publish_ms=0;
 uint8_t idPublish=0;
 String topic="";
 String msg="";
+////////////
+/// po zadanej zmianie predkosci od razu opublikuj na mqtt zmianę
+void publikujWiatrak(uint8_t id)
+{
+   topic=pubTopic+"WIATRAK/"+String(id)+"/pub/";     
+   msg=wiatraki[id].getStatusString();
+   mqtt.mqttPub(topic,msg);
+}
+//// nakladka na ustaw predkosc wiatraka by jednoczenie po zadanej zmianie publikowal zadany rozkaz
+void ustawPredkoscPublikuj(uint8_t id, uint8_t procent)
+{
+  wiatraki[id].ustawPredkosc(procent);
+  publikujWiatrak(id);
+}
 void loop()
 {
     wifi.loop();
@@ -313,9 +377,9 @@ void loop()
     wiatraki[WIATRAK_OUT].loop();
     for(int i=0;i<KOMORY_SZT;i++)
     {
-      komory[i].loop();
+      //komory[i].loop();
     }
-            
+  //  automat();        
     ////////////////// publish ///////////////
     if(millis()-publish_ms>2000)
     {
@@ -323,12 +387,14 @@ void loop()
       {
         topic=pubTopic+"KOMORA/"+idPublish+"/pub/";
         msg=komory[idPublish].getStatusString();
+        mqtt.mqttPub(topic,msg);
       } else
       {
-        topic=pubTopic+"WIATRAK/"+String(idPublish-KOMORY_SZT)+"/pub/";     
-        msg=komory[idPublish-KOMORY_SZT].getStatusString();
+        publikujWiatrak(idPublish-KOMORY_SZT);
+        ///topic=pubTopic+"WIATRAK/"+String(idPublish-KOMORY_SZT)+"/pub/";     
+       /// msg=wiatraki[idPublish-KOMORY_SZT].getStatusString();
       }
-      mqtt.mqttPub(topic,msg);
+     
       if(++idPublish >= 6) idPublish=0;
       publish_ms=millis();
     }
