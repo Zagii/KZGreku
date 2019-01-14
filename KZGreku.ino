@@ -48,6 +48,7 @@
 
 KZGwifi wifi;
 KZGmqtt mqtt;
+OneWire oneWire(PIN_ONEWIRE);
 
 KZGwiatrak wiatraki[WIATRAKI_SZT]=
 {
@@ -144,13 +145,13 @@ void setup()
     mqtt.setCallback(callback);
     // domyślna konfiguracja
     Serial.print("Przygotuj domyslny config MQTT");
-    mqtt.setMqtt("192.168.1.3",1883,"KZGreku","","","KZGrekuDebug");
+    mqtt.setMqtt("192.168.1.3",1883,"KZGreku1","","","KZGrekuDebug");
 
     mqtt.addSubscribeTopic(subTopic);
     //mqtt.importFromFile();
     ////////////////////////////////////////////////////////////////////
   //////////// komory //////////////////
-    OneWire oneWire(PIN_ONEWIRE);
+   
 
     for(int i=0;i<KOMORY_SZT;i++)
     {
@@ -375,9 +376,10 @@ void loop()
     mqtt.loop();
     wiatraki[WIATRAK_IN].loop();
     wiatraki[WIATRAK_OUT].loop();
+    delay(5);
     for(int i=0;i<KOMORY_SZT;i++)
     {
-      //komory[i].loop();
+      komory[i].loop();
     }
   //  automat();        
     ////////////////// publish ///////////////
